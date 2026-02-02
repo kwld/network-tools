@@ -107,12 +107,12 @@ make run
 
 All configuration is done via environment variables. See `config/config.example.env` for a complete list.
 
-#### Authentication
+#### Authentication (Default Credentials)
 - `NETWORK_SSH_USERNAME`: SSH username (default: admin)
 - `NETWORK_SSH_PASSWORD`: SSH password
 - `NETWORK_SSH_KEY_PATH`: Path to SSH private key (optional)
 
-#### SNMP Configuration
+#### SNMP Configuration (Default Settings)
 - `NETWORK_SNMP_COMMUNITY`: SNMPv2c community string (default: public)
 - `NETWORK_SNMP_VERSION`: SNMP version: 2c or 3 (default: 2c)
 - `NETWORK_SNMP_V3_USER`: SNMPv3 username
@@ -121,6 +121,7 @@ All configuration is done via environment variables. See `config/config.example.
 
 #### Scanner Settings
 - `NETWORK_DEVICES_FILE`: Path to device list file (default: /config/devices.txt)
+- `NETWORK_DEVICES_YAML`: Path to YAML config with per-IP credentials (default: /config/devices.yaml)
 - `NETWORK_OUTPUT_DIR`: Output directory (default: /output)
 - `NETWORK_SCAN_TIMEOUT`: Timeout per device in seconds (default: 30)
 - `NETWORK_CONCURRENT_SCANS`: Number of concurrent scans (default: 5)
@@ -129,7 +130,9 @@ All configuration is done via environment variables. See `config/config.example.
 - `NETWORK_DIAGRAM_FORMAT`: Output format: svg, png, pdf (default: svg)
 - `NETWORK_DIAGRAM_LAYOUT`: GraphViz layout: dot, neato, fdp, circo (default: dot)
 
-### Device List File
+### Device Configuration Options
+
+#### Option 1: Simple Text File (All Devices Use Same Credentials)
 
 Create a file with one IP address per line:
 
@@ -142,6 +145,50 @@ Create a file with one IP address per line:
 # Comments are allowed
 # 10.0.0.1
 ```
+
+#### Option 2: YAML Configuration (Per-Device Credentials)
+
+For environments where different devices require different credentials, create a `devices.yaml` file:
+
+```yaml
+devices:
+  # Device with SSH credentials
+  - ip: 192.168.1.1
+    ssh:
+      username: admin
+      password: password123
+    snmp:
+      community: public
+      version: 2c
+  
+  # Device with SSH key authentication
+  - ip: 192.168.1.2
+    ssh:
+      username: admin
+      key_path: /config/keys/device2_key
+    snmp:
+      community: private
+      version: 2c
+  
+  # Device with SNMPv3
+  - ip: 192.168.1.10
+    ssh:
+      username: netadmin
+      password: secure_pass
+    snmp:
+      version: 3
+      username: snmpuser
+      auth_password: authpass123
+      priv_password: privpass123
+  
+  # Device with SNMP only (no SSH)
+  - ip: 192.168.1.11
+    snmp:
+      community: readonly
+      version: 2c
+```
+
+**Note**: If `devices.yaml` exists, it will be used instead of `devices.txt`. Devices not listed in the YAML file will use default credentials from environment variables.
 
 ## Usage
 
@@ -245,6 +292,59 @@ The scanner generates several output files in the configured output directory:
 }
 ```
 
+## Device Information Extraction
+
+The scanner automatically extracts detailed device information including vendor, model, version, and connectivity data.
+
+### Supported Information
+
+- **Vendor Detection**: Automatically identifies device vendor (Mikrotik, Cisco, Motorola, Generic)
+- **Model Extraction**: Retrieves device model from:
+  - SSH command outputs (vendor-specific)
+  - SNMP sysDescr field (pattern matching)
+  - System information queries
+- **Version Information**: Captures firmware/software version
+- **Port Details**: Interface names, status, speed, MAC addresses
+- **Neighbor Discovery**: LLDP and CDP protocol support
+
+### Vendor-Specific Extraction
+
+#### Mikrotik RouterOS
+- Model from: `/system resource print` (board-name)
+- Version from: RouterOS version string
+- Interfaces via: `/interface print detail`
+- Neighbors via: `/ip neighbor print detail` (LLDP)
+
+#### Cisco IOS/IOS-XE
+- Model from: `show version` output
+- Version from: IOS/IOS-XE version string
+- Interfaces via: `show interfaces status`
+- Neighbors via: `show cdp neighbors detail` and `show lldp neighbors detail`
+
+#### Motorola Switches
+- Model from: `show system` output
+- Version from: System information
+- Interfaces via: `show interfaces`
+- Neighbors via: `show lldp neighbors detail`
+
+#### Generic/SNMP-Only Devices
+- Vendor/Model from: SNMP sysDescr pattern matching
+- Basic interface information via: IF-MIB
+- Limited neighbor discovery via: LLDP-MIB
+
+### Example Output with Model Information
+
+```json
+{
+  "ip": "192.168.1.1",
+  "hostname": "switch01",
+  "vendor": "mikrotik",
+  "model": "CRS328-24P-4S+",
+  "version": "7.11.2 (stable)",
+  "scan_status": "success"
+}
+```
+
 ## Architecture
 
 ### Project Structure
@@ -257,7 +357,9 @@ network-tools/
 │   ├── parser/          # Vendor-specific parsers
 │   ├── mapper/          # Topology mapping
 │   └── visualizer/      # Diagram generation
-├── pkg/models/          # Data models
+├── pkg/
+│   ├── models/          # Data models
+│   └── config/          # Configuration management
 ├── config/              # Configuration files
 └── output/              # Generated output (gitignored)
 ```

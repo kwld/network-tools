@@ -12,6 +12,7 @@ import (
 	"github.com/kwld/network-tools/internal/mapper"
 	"github.com/kwld/network-tools/internal/scanner"
 	"github.com/kwld/network-tools/internal/visualizer"
+	"github.com/kwld/network-tools/pkg/config"
 	"github.com/kwld/network-tools/pkg/models"
 )
 
@@ -19,12 +20,33 @@ func main() {
 	log.Println("Network Topology Scanner Starting...")
 
 	// Load configuration from environment
-	config := loadConfig()
+	cfg := loadConfig()
 
-	// Read device IPs from file
-	ips, err := readDeviceIPs(config.DevicesFile)
-	if err != nil {
-		log.Fatalf("Failed to read devices file: %v", err)
+	// Try to load YAML configuration for per-device credentials
+	var deviceConfig *config.DevicesConfig
+	var ips []string
+	var err error
+
+	// Check if YAML config file exists
+	yamlConfigPath := getEnv("NETWORK_DEVICES_YAML", "/config/devices.yaml")
+	if _, err := os.Stat(yamlConfigPath); err == nil {
+		log.Printf("Loading device configuration from YAML: %s", yamlConfigPath)
+		deviceConfig, err = config.LoadDevicesConfig(yamlConfigPath)
+		if err != nil {
+			log.Printf("Warning: Failed to load YAML config: %v", err)
+			log.Println("Falling back to devices.txt")
+		} else {
+			ips = deviceConfig.GetAllIPs()
+			log.Printf("Loaded %d devices from YAML configuration", len(ips))
+		}
+	}
+
+	// Fallback to text file if no YAML config
+	if len(ips) == 0 {
+		ips, err = readDeviceIPs(cfg.DevicesFile)
+		if err != nil {
+			log.Fatalf("Failed to read devices file: %v", err)
+		}
 	}
 
 	if len(ips) == 0 {
@@ -35,19 +57,24 @@ func main() {
 
 	// Create scanner
 	scannerConfig := scanner.Config{
-		SSHUsername:   config.SSHUsername,
-		SSHPassword:   config.SSHPassword,
-		SSHKeyPath:    config.SSHKeyPath,
-		SNMPCommunity: config.SNMPCommunity,
-		SNMPVersion:   config.SNMPVersion,
-		SNMPUsername:  config.SNMPUsername,
-		SNMPAuthPass:  config.SNMPAuthPass,
-		SNMPPrivPass:  config.SNMPPrivPass,
-		Timeout:       time.Duration(config.ScanTimeout) * time.Second,
-		MaxWorkers:    config.ConcurrentScans,
+		SSHUsername:   cfg.SSHUsername,
+		SSHPassword:   cfg.SSHPassword,
+		SSHKeyPath:    cfg.SSHKeyPath,
+		SNMPCommunity: cfg.SNMPCommunity,
+		SNMPVersion:   cfg.SNMPVersion,
+		SNMPUsername:  cfg.SNMPUsername,
+		SNMPAuthPass:  cfg.SNMPAuthPass,
+		SNMPPrivPass:  cfg.SNMPPrivPass,
+		Timeout:       time.Duration(cfg.ScanTimeout) * time.Second,
+		MaxWorkers:    cfg.ConcurrentScans,
 	}
 
 	s := scanner.NewScanner(scannerConfig)
+
+	// Configure per-device credentials if YAML config is loaded
+	if deviceConfig != nil {
+		configureDeviceCredentials(s, deviceConfig)
+	}
 
 	// Scan devices
 	log.Println("Scanning devices...")
@@ -64,7 +91,7 @@ func main() {
 	printSummary(topology)
 
 	// Ensure output directory exists
-	exporter := visualizer.NewExporter(config.OutputDir)
+	exporter := visualizer.NewExporter(cfg.OutputDir)
 	if err := exporter.EnsureOutputDir(); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
@@ -90,10 +117,10 @@ func main() {
 	log.Println("Generating network diagram...")
 	graph := mapper.BuildGraph(topology)
 	
-	generator := visualizer.NewGraphVizGenerator(config.DiagramLayout, config.DiagramFormat)
+	generator := visualizer.NewGraphVizGenerator(cfg.DiagramLayout, cfg.DiagramFormat)
 	
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	diagramPath := fmt.Sprintf("%s/topology_%s.%s", config.OutputDir, timestamp, config.DiagramFormat)
+	diagramPath := fmt.Sprintf("%s/topology_%s.%s", cfg.OutputDir, timestamp, cfg.DiagramFormat)
 	
 	if err := generator.Generate(graph, diagramPath); err != nil {
 		log.Printf("Failed to generate diagram: %v", err)
@@ -103,7 +130,7 @@ func main() {
 	}
 
 	// Also save DOT file
-	dotPath := fmt.Sprintf("%s/topology_%s.dot", config.OutputDir, timestamp)
+	dotPath := fmt.Sprintf("%s/topology_%s.dot", cfg.OutputDir, timestamp)
 	if err := generator.GenerateDOTFile(graph, dotPath); err != nil {
 		log.Printf("Failed to save DOT file: %v", err)
 	} else {
@@ -207,5 +234,38 @@ func printSummary(topology *models.Topology) {
 			fmt.Printf("  - %s\n", ip)
 		}
 	}
-	fmt.Println("==================================\n")
+	fmt.Println("==================================")
+}
+
+// configureDeviceCredentials configures per-device credentials in the scanner
+func configureDeviceCredentials(s *scanner.Scanner, devicesConfig *config.DevicesConfig) {
+	for _, devCfg := range devicesConfig.Devices {
+		var sshConfig *scanner.SSHConfig
+		var snmpConfig *scanner.SNMPConfig
+
+		// Configure SSH if provided
+		if devCfg.SSH != nil {
+			sshConfig = &scanner.SSHConfig{
+				Username: devCfg.SSH.Username,
+				Password: devCfg.SSH.Password,
+				KeyPath:  devCfg.SSH.KeyPath,
+			}
+			log.Printf("Configured SSH credentials for %s (username: %s)", devCfg.IP, devCfg.SSH.Username)
+		}
+
+		// Configure SNMP if provided
+		if devCfg.SNMP != nil {
+			snmpConfig = &scanner.SNMPConfig{
+				Version:   devCfg.SNMP.Version,
+				Community: devCfg.SNMP.Community,
+				Username:  devCfg.SNMP.Username,
+				AuthPass:  devCfg.SNMP.AuthPassword,
+				PrivPass:  devCfg.SNMP.PrivPassword,
+			}
+			log.Printf("Configured SNMP credentials for %s (version: %s)", devCfg.IP, devCfg.SNMP.Version)
+		}
+
+		// Set device credentials
+		s.SetDeviceCredentials(devCfg.IP, sshConfig, snmpConfig)
+	}
 }

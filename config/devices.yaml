@@ -1,0 +1,42 @@
+# Network Devices Configuration
+# This file allows you to configure devices with per-IP credentials
+# Format: YAML
+
+devices:
+  # Example with SSH credentials
+  - ip: 192.168.1.1
+    ssh:
+      username: admin
+      password: password123
+    snmp:
+      community: public
+      version: 2c
+  
+  # Example with SSH key authentication
+  - ip: 192.168.1.2
+    ssh:
+      username: admin
+      key_path: /config/keys/device2_key
+    snmp:
+      community: private
+      version: 2c
+  
+  # Example with SNMPv3
+  - ip: 192.168.1.10
+    ssh:
+      username: netadmin
+      password: secure_pass
+    snmp:
+      version: 3
+      username: snmpuser
+      auth_password: authpass123
+      priv_password: privpass123
+  
+  # Example using only SNMP (no SSH)
+  - ip: 192.168.1.11
+    snmp:
+      community: readonly
+      version: 2c
+
+# Note: If a device is not listed here, the scanner will use
+# the default credentials from environment variables (.env file)
