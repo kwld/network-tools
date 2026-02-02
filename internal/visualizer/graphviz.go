@@ -2,6 +2,7 @@ package visualizer
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -126,9 +127,6 @@ func (g *GraphVizGenerator) escapeID(s string) string {
 func (g *GraphVizGenerator) GenerateDOTFile(graph *mapper.Graph, filePath string) error {
 	dotSource := g.generateDOT(graph)
 	
-	// Write to file
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("cat > %s", filePath))
-	cmd.Stdin = strings.NewReader(dotSource)
-	
-	return cmd.Run()
+	// Write to file securely using os.WriteFile
+	return os.WriteFile(filePath, []byte(dotSource), 0644)
 }
