@@ -3,6 +3,8 @@ package scanner
 import (
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,10 +14,17 @@ import (
 
 // Scanner manages the network device scanning process
 type Scanner struct {
-	sshConfig  SSHConfig
-	snmpConfig SNMPConfig
-	timeout    time.Duration
-	maxWorkers int
+	sshConfig       SSHConfig
+	snmpConfig      SNMPConfig
+	timeout         time.Duration
+	maxWorkers      int
+	deviceConfigs   map[string]*DeviceCredentials // Per-device credentials
+}
+
+// DeviceCredentials holds custom credentials for a specific device
+type DeviceCredentials struct {
+	SSH  *SSHConfig
+	SNMP *SNMPConfig
 }
 
 // Config holds scanner configuration
@@ -51,8 +60,17 @@ func NewScanner(config Config) *Scanner {
 			PrivPass:  config.SNMPPrivPass,
 			Timeout:   config.Timeout,
 		},
-		timeout:    config.Timeout,
-		maxWorkers: config.MaxWorkers,
+		timeout:       config.Timeout,
+		maxWorkers:    config.MaxWorkers,
+		deviceConfigs: make(map[string]*DeviceCredentials),
+	}
+}
+
+// SetDeviceCredentials sets custom credentials for a specific device IP
+func (s *Scanner) SetDeviceCredentials(ip string, ssh *SSHConfig, snmp *SNMPConfig) {
+	s.deviceConfigs[ip] = &DeviceCredentials{
+		SSH:  ssh,
+		SNMP: snmp,
 	}
 }
 
@@ -87,6 +105,20 @@ func (s *Scanner) ScanDevices(ips []string) []models.Device {
 
 // ScanDevice scans a single device
 func (s *Scanner) ScanDevice(ip string) models.Device {
+	// Check if there are custom credentials for this device
+	var customSSH *SSHConfig
+	var customSNMP *SNMPConfig
+	
+	if creds, ok := s.deviceConfigs[ip]; ok {
+		customSSH = creds.SSH
+		customSNMP = creds.SNMP
+	}
+	
+	return s.ScanDeviceWithConfig(ip, customSSH, customSNMP)
+}
+
+// ScanDeviceWithConfig scans a single device with optional custom SSH/SNMP configs
+func (s *Scanner) ScanDeviceWithConfig(ip string, customSSH *SSHConfig, customSNMP *SNMPConfig) models.Device {
 	device := models.Device{
 		IP:          ip,
 		LastScanned: time.Now(),
@@ -95,8 +127,13 @@ func (s *Scanner) ScanDevice(ip string) models.Device {
 
 	log.Printf("Scanning device: %s", ip)
 
-	// Try SSH first
+	// Use custom SSH config if provided, otherwise use default
 	sshConfig := s.sshConfig
+	if customSSH != nil {
+		sshConfig = *customSSH
+		sshConfig.Timeout = s.timeout
+		sshConfig.Port = 22
+	}
 	sshConfig.Host = ip
 	
 	sshClient, err := NewSSHClient(sshConfig)
@@ -115,7 +152,13 @@ func (s *Scanner) ScanDevice(ip string) models.Device {
 	}
 
 	// Fallback to SNMP
+	// Use custom SNMP config if provided, otherwise use default
 	snmpConfig := s.snmpConfig
+	if customSNMP != nil {
+		snmpConfig = *customSNMP
+		snmpConfig.Timeout = s.timeout
+		snmpConfig.Port = 161
+	}
 	snmpConfig.Host = ip
 	
 	snmpClient, err := NewSNMPClient(snmpConfig)
@@ -166,9 +209,16 @@ func (s *Scanner) scanViaSNMP(client *SNMPClient, device *models.Device) error {
 
 	if sysDesc, ok := sysInfo["sysDescr"]; ok {
 		device.Version = sysDesc
+		// Try to extract vendor and model from sysDescr
+		s.parseVendorAndModel(sysDesc, device)
 	}
 	if sysName, ok := sysInfo["sysName"]; ok {
 		device.Hostname = sysName
+	}
+	
+	// Set vendor to generic if not detected
+	if device.Vendor == "" {
+		device.Vendor = "generic"
 	}
 
 	// Get interface info
@@ -186,4 +236,35 @@ func (s *Scanner) scanViaSNMP(client *SNMPClient, device *models.Device) error {
 	}
 
 	return nil
+}
+
+// parseVendorAndModel attempts to extract vendor and model from sysDescr
+func (s *Scanner) parseVendorAndModel(sysDescr string, device *models.Device) {
+	lower := strings.ToLower(sysDescr)
+	
+	// Detect vendor
+	if strings.Contains(lower, "mikrotik") || strings.Contains(lower, "routeros") {
+		device.Vendor = "mikrotik"
+	} else if strings.Contains(lower, "cisco") {
+		device.Vendor = "cisco"
+	} else if strings.Contains(lower, "motorola") {
+		device.Vendor = "motorola"
+	}
+	
+	// Try to extract model - look for common patterns
+	// Cisco: often has model after "Cisco" 
+	if device.Vendor == "cisco" {
+		re := regexp.MustCompile(`(?i)cisco\s+([A-Z0-9-]+)`)
+		if matches := re.FindStringSubmatch(sysDescr); len(matches) > 1 {
+			device.Model = matches[1]
+		}
+	}
+	
+	// Mikrotik: often has model after "RouterOS" or in description
+	if device.Vendor == "mikrotik" {
+		re := regexp.MustCompile(`(?i)(CRS|CCR|RB|hEX|hAP)[A-Z0-9-]*`)
+		if matches := re.FindStringSubmatch(sysDescr); len(matches) > 0 {
+			device.Model = matches[0]
+		}
+	}
 }
