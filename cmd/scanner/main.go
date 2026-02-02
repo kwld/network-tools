@@ -234,7 +234,7 @@ func printSummary(topology *models.Topology) {
 			fmt.Printf("  - %s\n", ip)
 		}
 	}
-	fmt.Println("==================================\n")
+	fmt.Println("==================================")
 }
 
 // configureDeviceCredentials configures per-device credentials in the scanner
