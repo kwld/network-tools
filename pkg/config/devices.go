@@ -57,9 +57,9 @@ func LoadDevicesConfig(filepath string) (*DevicesConfig, error) {
 
 // GetDeviceConfig returns the configuration for a specific IP address
 func (dc *DevicesConfig) GetDeviceConfig(ip string) *DeviceConfig {
-	for _, device := range dc.Devices {
-		if device.IP == ip {
-			return &device
+	for i := range dc.Devices {
+		if dc.Devices[i].IP == ip {
+			return &dc.Devices[i]
 		}
 	}
 	return nil

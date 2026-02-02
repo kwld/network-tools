@@ -80,6 +80,92 @@ NETWORK_DEVICES_YAML=/config/devices.yaml
 
 ---
 
+## SSH Key Authentication Setup
+
+When using SSH keys for authentication, you need to properly configure and mount the keys.
+
+### Local Development
+
+1. **Generate or prepare SSH key:**
+```bash
+# If you don't have a key, generate one
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/network_scanner_key
+
+# Copy public key to target devices
+ssh-copy-id -i ~/.ssh/network_scanner_key.pub admin@192.168.1.1
+```
+
+2. **Set correct permissions:**
+```bash
+chmod 600 ~/.ssh/network_scanner_key
+chmod 644 ~/.ssh/network_scanner_key.pub
+```
+
+3. **Configure in YAML:**
+```yaml
+devices:
+  - ip: 192.168.1.1
+    ssh:
+      username: admin
+      key_path: /path/to/.ssh/network_scanner_key
+```
+
+### Docker Deployment
+
+1. **Create keys directory in project:**
+```bash
+mkdir -p config/keys
+cp ~/.ssh/network_scanner_key config/keys/
+chmod 600 config/keys/network_scanner_key
+```
+
+2. **Update docker-compose.yml to mount keys:**
+```yaml
+services:
+  scanner:
+    volumes:
+      - ./config:/config:ro
+      - ./output:/output
+      # Keys are already in config/keys/
+```
+
+3. **Configure in YAML with container path:**
+```yaml
+devices:
+  - ip: 192.168.1.1
+    ssh:
+      username: admin
+      key_path: /config/keys/network_scanner_key
+```
+
+### Security Best Practices for SSH Keys
+
+1. **Use separate keys for automation:**
+   - Don't use your personal SSH key
+   - Create a dedicated key for the scanner
+
+2. **Restrict permissions:**
+   ```bash
+   chmod 600 config/keys/*
+   # Or in Dockerfile:
+   RUN chmod 600 /config/keys/*
+   ```
+
+3. **Use passphrase-protected keys (optional):**
+   ```bash
+   ssh-keygen -t rsa -b 4096 -f network_key -N "your-passphrase"
+   ```
+   Note: Scanner currently doesn't support passphrase-protected keys in automated mode
+
+4. **Limit key access on devices:**
+   On the network device, restrict what the key can do:
+   ```bash
+   # In ~/.ssh/authorized_keys on the device:
+   command="show system",no-pty,no-port-forwarding ssh-rsa AAAAB3N... scanner@host
+   ```
+
+---
+
 ## Real-World Scenarios
 
 ### Scenario 1: Mixed Vendor Environment

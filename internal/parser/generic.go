@@ -7,6 +7,13 @@ import (
 	"github.com/kwld/network-tools/pkg/models"
 )
 
+// Pre-compiled regex patterns for performance
+var (
+	hostnameRegex = regexp.MustCompile(`(?i)hostname[:\s]+([^\s]+)`)
+	modelRegex    = regexp.MustCompile(`(?i)model[:\s]+(.+)`)
+	versionRegex  = regexp.MustCompile(`(?i)version[:\s]+([^\s,]+)`)
+)
+
 // GenericParser handles generic devices with LLDP support
 type GenericParser struct{}
 
@@ -46,12 +53,12 @@ func (p *GenericParser) parseSystemInfo(output string, device *models.Device) {
 		line = strings.TrimSpace(line)
 		
 		// Try to find hostname
-		if match := regexp.MustCompile(`(?i)hostname[:\s]+([^\s]+)`).FindStringSubmatch(line); len(match) > 1 {
+		if match := hostnameRegex.FindStringSubmatch(line); len(match) > 1 {
 			device.Hostname = strings.TrimSpace(match[1])
 		}
 		
 		// Try to find model
-		if match := regexp.MustCompile(`(?i)model[:\s]+(.+)`).FindStringSubmatch(line); len(match) > 1 {
+		if match := modelRegex.FindStringSubmatch(line); len(match) > 1 {
 			device.Model = strings.TrimSpace(match[1])
 		}
 	}
@@ -65,13 +72,13 @@ func (p *GenericParser) parseVersionInfo(output string, device *models.Device) {
 		line = strings.TrimSpace(line)
 		
 		// Try to find version
-		if match := regexp.MustCompile(`(?i)version[:\s]+([^\s,]+)`).FindStringSubmatch(line); len(match) > 1 {
+		if match := versionRegex.FindStringSubmatch(line); len(match) > 1 {
 			device.Version = strings.TrimSpace(match[1])
 		}
 		
 		// Try to find model if not already set
 		if device.Model == "" {
-			if match := regexp.MustCompile(`(?i)model[:\s]+(.+)`).FindStringSubmatch(line); len(match) > 1 {
+			if match := modelRegex.FindStringSubmatch(line); len(match) > 1 {
 				device.Model = strings.TrimSpace(match[1])
 			}
 		}
