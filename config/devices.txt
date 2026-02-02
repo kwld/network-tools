@@ -1,0 +1,12 @@
+# Example devices to scan
+# Add one IP address per line
+# Lines starting with # are comments
+
+# Example IPs (replace with your actual device IPs)
+# 192.168.1.1
+# 192.168.1.2
+# 192.168.1.10
+# 192.168.1.11
+
+# For testing, you can use localhost or any accessible network device
+# 127.0.0.1
